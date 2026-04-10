@@ -52,56 +52,68 @@ class _AuraHomePageState extends State<AuraHomePage> {
   bool _isListening = false;
 
   @override
-  void initState() {
-    super.initState();
-    _initAura();
-    _audioPlayer.onPlayerComplete.listen((event) {
-      if (mounted) {
-        setState(() {
-          _currentMode = AppMode.kws;
-          _displayText = 'Aura 再次就绪\n请试着喊："小爱同学"';
-          _pcmBuffer.clear();
-          if (_kws != null && _onlineStream != null) {
-            _kws!.reset(_onlineStream!);
-          }
-        });
-      }
-    });
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              // 根据状态机切换图标
+              _currentMode == AppMode.recording ? Icons.mic 
+                : _currentMode == AppMode.kws ? Icons.hearing 
+                : Icons.api,
+              size: 80,
+              // 录音时红色，待命时青色，处理请求时灰色
+              color: _currentMode == AppMode.recording ? Colors.redAccent 
+                : _currentMode == AppMode.kws ? Colors.cyanAccent 
+                : Colors.grey,
+            ),
+            const SizedBox(height: 30),
+            Text(
+              _displayText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  Future<void> _pingServer(String triggerWord) async {
-    // 替换为你的 RTX 3090 局域网 IP
-    const String serverUrl = 'http://192.168.1.114:18000/api/aura/ping'; 
-
-    try {
-      setState(() {
-        _displayText = '唤醒成功！\n正在呼叫 3090 大脑...';
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer.setAudioContext(AudioContext(
+      android: AudioContextAndroid(
+        audioFocus: AndroidAudioFocus.none, // 绝不抢占焦点
+      ),
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.playAndRecord,
+        options: {
+          AVAudioSessionOptions.defaultToSpeaker,
+          AVAudioSessionOptions.mixWithOthers, 
+        },
+      ),
+    ));
+    _initAura();
+    _audioPlayer.onPlayerComplete.listen((event) {
+      // 🚨 加上 500ms 延迟，等扬声器物理余音彻底散去
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() {
+            _currentMode = AppMode.kws;
+            _displayText = 'Aura 再次就绪\n请试着喊："小爱同学"';
+            _pcmBuffer.clear();
+            
+            // 🚨 回归官方最安全的 C++ 状态清空方法
+            if (_kws != null && _onlineStream != null) {
+              _kws!.reset(_onlineStream!); 
+            }
+          });
+        }
       });
-
-      final response = await http.post(
-        Uri.parse(serverUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'client_id': 'Aura_Phone_01',
-          'message': '我听到了唤醒词 [$triggerWord]，请求连接！',
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes)); // 支持中文解码
-        setState(() {
-          _displayText = '连接通畅！\n大脑回复: ${data["relay_reply"]}';
-        });
-      } else {
-        setState(() {
-          _displayText = '服务器报错了: 状态码 ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _displayText = '网络连接失败，请检查 IP 和局域网！\n$e';
-      });
-    }
+    });
   }
 
   void _startRecording() {
@@ -123,60 +135,56 @@ class _AuraHomePageState extends State<AuraHomePage> {
     });
 
     try {
-      // 记得替换成你 3090 的 IP
-      var request = http.MultipartRequest('POST', Uri.parse('http://192.168.1.114:18000/api/aura/audio'));
-      
-      // 将收集到的字节流伪装成文件上传
-      request.files.add(http.MultipartFile.fromBytes(
-        'audio_file',
-        _pcmBuffer,
-        filename: 'command.pcm', // 纯 PCM 格式，没有 WAV 头
-      ));
+      var request = http.MultipartRequest('POST', Uri.parse('http://192.168.1.114:18000/api/aura/upload'));
+      request.files.add(http.MultipartFile.fromBytes('audio_file', _pcmBuffer, filename: 'command.pcm'));
 
       var response = await request.send();
-      // var responseBody = await response.stream.bytesToString();
-      // var data = jsonDecode(responseBody);
-
-      // setState(() {
-      //   _displayText = '传输完成！\n大脑回复: ${data["router_reply"]}';
-      // });
       
       if (response.statusCode == 200) {
-        // 🚨 核心改变：直接读取二进制流，不转 JSON
-        final audioBytes = await response.stream.toBytes();
+        var responseBody = await response.stream.bytesToString();
+        var data = jsonDecode(responseBody);
+        String taskId = data['task_id'];
 
         setState(() {
-          _displayText = '正在播放 Aura 的回答...';
+          _displayText = '正在进行流式通联...';
         });
 
-        // 调用播放器，直接播放内存中的字节流！
-        await _audioPlayer.play(BytesSource(audioBytes));
-        
+        await _audioPlayer.stop();
+        await _audioPlayer.release();
+        String streamUrl = 'http://192.168.1.114:18000/api/aura/stream/$taskId.mp3';
+        await _audioPlayer.play(UrlSource(streamUrl));
       } else {
         setState(() {
           _displayText = '大脑短路了: 状态码 ${response.statusCode}';
         });
+        _resetToKws(); // 失败时，手动重置
       }
-
     } catch (e) {
       setState(() {
         _displayText = '发送失败: $e';
       });
-    } finally {
-      // 休息 2 秒后，重新回到待机唤醒状态
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          setState(() {
-            _currentMode = AppMode.kws;
-            _displayText = 'Aura 再次就绪';
-            _pcmBuffer.clear();
-            _kws!.reset(_onlineStream!);
-          });
-        }
-      });
+      _resetToKws(); // 失败时，手动重置
     }
+    // 🚨 绝密修复：原先这里的 finally 代码块已经被彻底删除了！
   }
 
+  void _resetToKws() {
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _currentMode = AppMode.kws;
+          _displayText = 'Aura 再次就绪\n请试着喊："小爱同学"';
+          _pcmBuffer.clear();
+          
+          // 🚨 同样替换为销毁重建逻辑
+          if (_kws != null) {
+            _onlineStream?.free();
+            _onlineStream = _kws!.createStream();
+          }
+        });
+      }
+    });
+  }
   // 核心辅助方法：将 assets 中的模型拷贝到真机物理目录下，供 C++ 底层调用
   Future<String> _copyAsset(String assetPath) async {
     final directory = await getApplicationDocumentsDirectory();
@@ -270,23 +278,19 @@ class _AuraHomePageState extends State<AuraHomePage> {
       }
       double currentVolume = volumeSum / float32List.length;
 
-      // _onlineStream!.acceptWaveform(
-      //   samples: float32List,
-      //   sampleRate: 16000,
-      // );
-
       if (_currentMode == AppMode.kws) {
         _onlineStream!.acceptWaveform(samples: float32List, sampleRate: 16000);
         while (_kws!.isReady(_onlineStream!)) {
           _kws!.decode(_onlineStream!);
           final keyword = _kws!.getResult(_onlineStream!).keyword;
           if (keyword.isNotEmpty) {
-            _kws!.reset(_onlineStream!); 
-            _startRecording(); // 听到了！立刻切换到录音模式
+            // 🚨 听到唤醒词后，立刻销毁旧流，保证下次的纯净
+            _kws!.reset(_onlineStream!);
+            _startRecording(); // 切入录音模式
             break;
           }
         }
-      } 
+      }
       // ====== 状态 2：唤醒成功，正在录制指令并进行 VAD 判断 ======
       else if (_currentMode == AppMode.recording) {
         // 把声音字节原封不动塞进我们的袋子里
@@ -307,41 +311,9 @@ class _AuraHomePageState extends State<AuraHomePage> {
         }
       }
 
-      // 解码并获取结果
-      // while (_kws!.isReady(_onlineStream!)) {
-      //   _kws!.decode(_onlineStream!);
-        
-      //   final keyword = _kws!.getResult(_onlineStream!).keyword;
-      //   if (keyword.isNotEmpty) {
-      //     _onWakeWordDetected(keyword);
-      //     _kws!.reset(_onlineStream!); // 听到后立刻重置状态缓冲
-      //   }
-      // }
     });
   }
 
-  void _onWakeWordDetected(String keyword) {
-    if (!mounted) return;
-    setState(() {
-      _displayText = 'Hello World!\n成功捕捉到唤醒词: $keyword';
-      _isListening = false;
-    });
-
-    _kws!.reset(_onlineStream!);
-
-    // 触发网络请求！
-    _pingServer(keyword).then((_) {
-      // 请求完成（无论成败），3秒后恢复倾听状态
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _displayText = 'Aura 再次就绪\n请试着喊："小爱同学"';
-            _isListening = true;
-          });
-        }
-      });
-    });
-  }
 
   @override
   void dispose() {
@@ -352,27 +324,4 @@ class _AuraHomePageState extends State<AuraHomePage> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              _isListening ? Icons.mic : Icons.api,
-              size: 80,
-              color: _isListening ? Colors.cyanAccent : Colors.grey,
-            ),
-            const SizedBox(height: 30),
-            Text(
-              _displayText,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.5),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
