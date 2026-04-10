@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File
+import uuid
+from fastapi import FastAPI, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import xml.sax.saxutils as saxutils
@@ -137,6 +138,50 @@ async def generate_tts_stream(user_text: str):
             if audio_chunk["type"] == "audio":
                 yield audio_chunk.get("data", b"")
 
+@app.post("/api/aura/upload")
+async def upload_audio(audio_file: UploadFile = File(...)):
+    task_id = uuid.uuid4().hex
+    save_path = f"command_{task_id}.wav"
+    
+    pcm_data = await audio_file.read()
+    with wave.open(save_path, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(pcm_data)
+
+    return {"status": "success", "task_id": task_id}
+
+@app.get("/api/aura/stream/{task_id}.mp3")
+async def stream_audio(task_id: str):
+    save_path = f"command_{task_id}.wav"
+    
+    # 🚨 检查文件是否存在，如果不存在直接报错，避免崩溃
+    if not os.path.exists(save_path):
+        print(f"[❌ 严重错误] 找不到文件: {save_path}")
+        return Response(status_code=404)
+
+    try:
+        segments, info = asr_model.transcribe(
+            save_path, language="zh", beam_size=5, initial_prompt="以下是一段简体中文。"
+        )
+        user_text = "".join([segment.text for segment in segments]).strip()
+        print(f"[💡 提取指令] 清川说: {user_text}")
+
+        # 🚨 识别为空时给一个默认回复
+        if not user_text:
+            user_text = "我没听清，请再说一遍。"
+
+        # 🚨 这里的 StreamingResponse 内部会调用 generate_tts_stream
+        # 移除函数内的 os.remove(save_path)，文件等以后统一删
+        return StreamingResponse(
+            generate_tts_stream(user_text), 
+            media_type="audio/mpeg"
+        )
+    except Exception as e:
+        print(f"[❌ ASR 链路异常] {e}")
+        return Response(status_code=500)
+    
 @app.post("/api/aura/audio")
 async def receive_audio(audio_file: UploadFile = File(...)):
     time_now = datetime.datetime.now().strftime("%H:%M:%S")
@@ -170,45 +215,6 @@ async def receive_audio(audio_file: UploadFile = File(...)):
         #  return {"status": "success", "router_reply": "我没有听清，可以再说一遍吗？"}
         user_text = "我没有听清，可以再说一遍吗？"
 
-    # # 2. 组装发给大模型的数据包
-    # payload = {
-    #     "model": MODEL_NAME,
-    #     "messages": [
-    #         {
-    #             "role": "system", 
-    #             "content": "你是 Aura，由 CyanFlow Technology 的主理人清川所创造的专属 AI 助理。你的回答必须极其简明扼要、直击痛点，不要有任何废话，符合极客和系统开发者的交流习惯。当前只支持语音交互，所以请尽量口语化输出。"
-    #         },
-    #         {
-    #             "role": "user", 
-    #             "content": user_text
-    #         }
-    #     ],
-    #     "stream": False, # 第一版先用非流式，保证链路通畅
-    #     "think": False
-    # }
-
-    # # 3. 异步请求 Ollama (设置 60 秒超时，防止 31B 模型首次推理缓存/KV-Cache 加载过慢)
-    # print("[🧠 思考中] 正在呼叫 Gemma 4 31B 大脑...")
-    # try:
-    #     async with httpx.AsyncClient(timeout=60.0) as client:
-    #         response = await client.post(OLLAMA_API_URL, json=payload)
-    #         response.raise_for_status() # 如果返回 4xx 或 5xx 会直接抛出异常
-            
-    #         # 解析 Ollama 标准返回格式
-    #         llm_reply = response.json().get("message", {}).get("content", "大模型返回了空数据。")
-    #         print(f"[✨ 思考完毕] Aura: {llm_reply}")
-            
-    # except Exception as e:
-    #     llm_reply = f"大脑神经连接异常，报错信息：{str(e)}"
-    #     print(f"[❌ 异常] {llm_reply}")
-
-    
-    # # 3. 将回复转为语音
-    # audio_bytes = await text_to_speech_bytes(llm_reply)
-    
-    # # 4. 返回 MP3 给手机 (注意：这里返回 Response 类型)
-    # from fastapi.responses import Response
-    # return Response(content=audio_bytes, media_type="audio/mpeg")
 
     print("[🧠 思考与发声并行中...]")
     
