@@ -1,0 +1,3 @@
+[submodule "services/cosy_voice/CosyVoice"]
+	path = services/cosy_voice/CosyVoice
+	url = git@github.com:FunAudioLLM/CosyVoice.git
