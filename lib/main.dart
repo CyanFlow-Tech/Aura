@@ -36,6 +36,8 @@ class AuraHomePage extends StatefulWidget {
 
 enum AppMode { kws, recording, processing }
 
+
+
 class _AuraHomePageState extends State<AuraHomePage> {
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -146,13 +148,16 @@ class _AuraHomePageState extends State<AuraHomePage> {
         String taskId = data['task_id'];
 
         setState(() {
-          _displayText = '正在进行流式通联...';
+          _displayText = '正在思考中...';
         });
 
         await _audioPlayer.stop();
         await _audioPlayer.release();
         String streamUrl = 'http://192.168.1.114:18000/api/aura/stream/$taskId.mp3';
-        await _audioPlayer.play(UrlSource(streamUrl));
+        
+        // await _audioPlayer.play(UrlSource(streamUrl));
+
+        await _safeStreamPlay(streamUrl);
       } else {
         setState(() {
           _displayText = '大脑短路了: 状态码 ${response.statusCode}';
@@ -165,7 +170,85 @@ class _AuraHomePageState extends State<AuraHomePage> {
       });
       _resetToKws(); // 失败时，手动重置
     }
-    // 🚨 绝密修复：原先这里的 finally 代码块已经被彻底删除了！
+  }
+
+  /// 全新的安全流式播放方法
+  Future<void> _safeStreamPlay(String url) async {
+    // 获取临时目录，用于存放边下边播的 mp3 文件
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/aura_stream_${DateTime.now().millisecondsSinceEpoch}.mp3');
+    final sink = tempFile.openWrite();
+
+    try {
+      // 发起 GET 请求，拿到底层字节流
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(url));
+      final response = await client.send(request);
+
+      // 拦截初始的 404 等非 200 状态码
+      if (response.statusCode != 200) {
+        setState(() => _displayText = '服务器拒绝请求: ${response.statusCode}');
+        _resetToKws();
+        return;
+      }
+
+      String checkBuffer = ''; // 用于拼接并检查是否有后端传来的错误 JSON
+      bool isError = false;
+
+      // 边读流，边检查，边写本地文件
+      await for (final chunk in response.stream) {
+        if (isError) break; // 如果已经发现错误，停止读取剩余流
+
+        // 1. 将 chunk 当作字符串尝试解析（正常 MP3 是乱码，不影响判断）
+        final chunkStr = utf8.decode(chunk, allowMalformed: true);
+        checkBuffer += chunkStr;
+
+        // 2. 检查是否包含你在 Python 后端定义的错误标识
+        // (对应上文 Python 代码中 yield 的 json.dumps({"type": "stream_error"...}))
+        if (checkBuffer.contains('"type":"stream_error"') || checkBuffer.contains('"stream_error"')) {
+          debugPrint("⚠️ 拦截到后端流式错误标识！");
+          isError = true;
+          
+          // 立刻停止播放器，关闭文件，斩断死循环
+          await _audioPlayer.stop();
+          await sink.close();
+          // 删掉写了一半的残缺 mp3
+          if (await tempFile.exists()) await tempFile.delete();
+          
+          setState(() => _displayText = '后端生成失败，请检查模型服务');
+          _resetToKws();
+          return; // 直接退出方法
+        }
+
+        // 3. 防止 checkBuffer 内存无限增长（保留最后 100 个字符足够判断了）
+        if (checkBuffer.length > 100) {
+          checkBuffer = checkBuffer.substring(checkBuffer.length - 100);
+        }
+
+        // 4. 如果没有错误，将正常的 MP3 字节写入本地文件
+        sink.add(chunk);
+      }
+
+      await sink.close(); // 流读取完毕，关闭文件写入
+
+      // 如果没有发生错误，且文件有内容，开始播放本地文件
+      if (!isError && await tempFile.exists()) {
+        // 🚨 注意这里用的是 DeviceFileSource (本地文件路径)，不再是 UrlSource
+        await _audioPlayer.play(DeviceFileSource(tempFile.path));
+        
+        // 播放结束后，在 onPlayerComplete 监听里清理临时文件
+        _audioPlayer.onPlayerComplete.first.whenComplete(() async {
+          if (await tempFile.exists()) await tempFile.delete();
+        });
+      }
+
+    } catch (e) {
+      debugPrint("流式下载或播放发生严重网络错误: $e");
+      await sink.close();
+      if (await tempFile.exists()) await tempFile.delete();
+      setState(() => _displayText = '网络连接中断');
+      _resetToKws();
+    }
   }
 
   void _resetToKws() {
