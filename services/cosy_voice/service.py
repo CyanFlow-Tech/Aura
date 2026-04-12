@@ -29,7 +29,7 @@ async def generate_voice(req: TTSRequest):
         print(f"\nStarting streaming synthesis -> {req.text}")
         tts_generator = cosyvoice.inference_cross_lingual(
             f'You are a helpful assistant.<|endofprompt|>{req.text}', 
-            './assets/girl.wav', stream=True, speed=1.5
+            './assets/girl.wav', stream=True, speed=2.0
         )
         # tts_generator = cosyvoice.inference_sft(req.text, req.speaker, stream=True)
         

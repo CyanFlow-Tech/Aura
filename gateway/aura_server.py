@@ -2,6 +2,7 @@ import uuid
 import uvicorn
 import wave
 import os
+import json
 from fastapi import FastAPI, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 from speech_to_text import STTClient
@@ -27,6 +28,10 @@ llm_client = LLMClient(
 audio_stream_llm = asyncio.run(AudioStreamLLM.build(
     llm_client, tts_client, "模型未响应，请检查服务是否正常。"))
 
+# Global task manager to coordinate between audio and text streams
+# Maps task_id to its corresponding asyncio.Queue
+task_queues: dict[str, asyncio.Queue] = {}
+
 app = FastAPI(title="Aura Server")
 
 @app.post("/api/aura/upload")
@@ -42,6 +47,36 @@ async def request(audio_file: UploadFile = File(...)):
     cache.evict(save_path)
     return {"status": "success", "task_id": task_id}
 
+@app.get("/api/aura/text_stream/{task_id}")
+async def text_stream(task_id: str):
+    """
+    SSE endpoint to push LLM tokens to the Flutter app in real-time.
+    """
+    # Ensure a queue exists for this task even if audio stream hasn't started yet
+    if task_id not in task_queues:
+        task_queues[task_id] = asyncio.Queue()
+
+    async def event_generator():
+        try:
+            while True:
+                # Wait asynchronously for new tokens from the LLM generator
+                token = await task_queues[task_id].get()
+                
+                # Check for the termination signal
+                if token == "[DONE]":
+                    yield "data: [DONE]\n\n"
+                    break
+                
+                # Format the token as an SSE data line
+                # ensure_ascii=False prevents Chinese characters from becoming unicode escapes
+                yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+        finally:
+            # Clean up the queue to prevent memory leaks once the connection is closed
+            if task_id in task_queues:
+                del task_queues[task_id]
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 @app.get("/api/aura/stream/{task_id}.mp3")
 async def get_response(task_id: str):
     save_path = cache.path(f"command_{task_id}.wav")
@@ -53,9 +88,16 @@ async def get_response(task_id: str):
         user_text = stt_client.speech_to_text(save_path)
         logger.info(f"User text: {user_text}")
 
-        if user_text:    
+        if user_text:
+            # Bind the text queue for this specific task
+            if task_id not in task_queues:
+                task_queues[task_id] = asyncio.Queue()
+                
+            text_queue = task_queues[task_id]
+
             return StreamingResponse(
-                audio_stream_llm.generate_answer_stream(user_text), 
+                # Pass the queue into the generator
+                audio_stream_llm.generate_answer_stream(user_text, text_queue), 
                 media_type="audio/mpeg"
             )
         else:

@@ -1,5 +1,6 @@
 import json
-from typing import AsyncGenerator
+import asyncio
+from typing import AsyncGenerator, Optional
 from text_to_speech import TTSClient
 from utils.mlogging import LoggingMixin
 from contextlib import asynccontextmanager
@@ -19,7 +20,7 @@ class LLMClient(LoggingMixin):
         payload = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "你是 Aura，请简明扼要作答，口语化，不要废话。"},
+                {"role": "system", "content": "你是 Aura，请简明扼要作答，口语化，不要废话。输出结果使用普通文本，不要使用 Markdown 格式。"},
                 {"role": "user", "content": user_text}
             ],
             "stream": True,
@@ -63,23 +64,35 @@ class AudioStreamLLM(LoggingMixin):
         fallback_audio = await tts_client.text_to_speech(fallback_text)
         return AudioStreamLLM(llm_client, tts_client, fallback_audio)
 
-    async def generate_answer_stream(self, user_text: str):
+    async def generate_answer_stream(self, user_text: str, text_queue: Optional[asyncio.Queue] = None):
+        """
+        Generate audio stream and optionally push text tokens to a queue for SSE.
+        """
         has_generated_audio = False 
-
         sentence = ""
+
         async with self.llm_client.chat(user_text, think=False) as response:
             async for char in self.llm_client.parse_response(response):
+
                 sentence += char
                 if char in self.stop_flags and len(sentence) >= self.min_sentence:
                     if audio_bytes := await self.tts_client.text_to_speech(sentence):
                         self.logger.info(f"Generating audio for sentence: {sentence}")
                         has_generated_audio = True
+                        if text_queue is not None:
+                            await text_queue.put(sentence)
                         yield audio_bytes
                     sentence = ""
         if sentence and (audio_bytes := await self.tts_client.text_to_speech(sentence)):
             has_generated_audio = True
+            if text_queue is not None:
+                await text_queue.put(sentence)
             yield audio_bytes
 
         if not has_generated_audio:
             self.logger.warning("No valid text generated, fallback to default audio")
             yield self.fallback_audio
+        
+        # Send the EOF signal to the SSE client
+        if text_queue is not None:
+            await text_queue.put("[DONE]")
