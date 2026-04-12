@@ -14,6 +14,8 @@ class AuraController extends ChangeNotifier {
   final KwsService _kwsService = KwsService();
   
   StreamSubscription<List<int>>? _micSubscription;
+  StreamSubscription<String>? _textStreamSubscription;
+  String _accumulatedLlmReply = '';
 
   // state variables
   AppMode currentMode = AppMode.kws;
@@ -37,7 +39,7 @@ class AuraController extends ChangeNotifier {
   Future<void> _initSystem() async {
     // listen to the player completion event
     _audioService.onPlayerComplete.listen((_) {
-      Future.delayed(const Duration(milliseconds: 500), _hardResetToKws);
+      _fastResetToKws();
     });
 
     final status = await Permission.microphone.request();
@@ -100,30 +102,77 @@ class AuraController extends ChangeNotifier {
 
   Future<void> _stopAndProcessAudio() async {
     if (currentMode != AppMode.recording) return;
-    _updateState(AppMode.processing, '录音结束，正在发送给大脑...');
-
+    _updateState(AppMode.processing, '正在思考中...');
+    
+    // 1. Upload audio and get taskId
     String? taskId = await _apiService.uploadAudio(_pcmBuffer);
     if (taskId == null) {
-      _updateState(AppMode.kws, '大脑短路了：上传失败');
-      _hardResetToKws();
+      _errorResetToKws('大脑短路了：上传失败');
       return;
     }
-    _updateState(AppMode.processing, '正在思考中...');
+
+    // 2. Prepare for new response
+    _accumulatedLlmReply = ''; // Reset the reply buffer
     await _audioService.stopPlayer();
+
+    // 3. Start SSE Text Stream (Parallel with Audio)
+    _startSseTextStream(taskId);
+
+    // 4. Start Audio Stream
     String streamUrl = '${AppConfig.baseUrl}/stream/$taskId.mp3';
     try {
       await _audioService.playStreamUrl(streamUrl);
     } catch (e) {
-      _updateState(AppMode.kws, '流式连接失败');
-      _hardResetToKws();
+      _errorResetToKws('流式连接失败，请检查网络');
     }
   }
 
-  void _hardResetToKws() {
+  void _startSseTextStream(String taskId) {
+    // Cancel any existing subscription before starting a new one
+    _textStreamSubscription?.cancel();
+
+    _textStreamSubscription = _apiService
+        .listenToTextStream(taskId)
+        .listen((token) {
+          _accumulatedLlmReply += token;
+          // Update the UI with both user text and the streaming reply
+          // Note: You may need to store user_text in a variable after upload
+          _updateState(AppMode.processing, 'Aura: $_accumulatedLlmReply');
+        }, onError: (error) {
+          debugPrint('Text Stream Error: $error');
+        }, onDone: () {
+          debugPrint('Text Stream Completed');
+        });
+  }
+
+  // 🟢 极速重置：用于正常对话结束，0延迟瞬间恢复听力！
+  void _fastResetToKws() {
+    if (_isDisposed) return;
+    
+    _textStreamSubscription?.cancel();
+    _textStreamSubscription = null;
+    _accumulatedLlmReply = '';
+    _pcmBuffer.clear();
+    
+    _updateState(AppMode.kws, 'Aura 就绪\n请试着喊："小爱同学"');
+    _kwsService.hardResetStream(); // 瞬间重置唤醒引擎
+  }
+
+  // 🔴 错误重置：用于网络崩溃等异常，保留2秒让用户看清错误提示
+  void _errorResetToKws(String errorMsg) {
+    _textStreamSubscription?.cancel();
+    _textStreamSubscription = null;
+    
+    // 第一时间把错误信息打到屏幕上
+    _updateState(AppMode.kws, errorMsg); 
+    
+    // 强制等待2秒，不让底层录音机抢夺焦点
     Future.delayed(const Duration(seconds: 2), () {
       if (_isDisposed) return;
-      _updateState(AppMode.kws, 'Aura 就绪\n请试着喊："小爱同学"');
+      
+      _accumulatedLlmReply = '';
       _pcmBuffer.clear();
+      _updateState(AppMode.kws, 'Aura 就绪\n请试着喊："小爱同学"');
       _kwsService.hardResetStream();
     });
   }
@@ -134,6 +183,7 @@ class AuraController extends ChangeNotifier {
     _micSubscription?.cancel();
     _audioService.dispose();
     _kwsService.dispose();
+    _textStreamSubscription?.cancel();
     super.dispose();
   }
 }

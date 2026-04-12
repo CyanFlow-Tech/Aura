@@ -29,44 +29,44 @@ class ApiService {
     }
   }
 
-  // return the path of the downloaded local temporary file, if failed return null
-  Future<String?> downloadStreamAndSave(String taskId) async {
-    final tempDir = await getTemporaryDirectory();
-    final tempFile = File('${tempDir.path}/aura_stream_${DateTime.now().millisecondsSinceEpoch}.mp3');
-    final sink = tempFile.openWrite();
+  Stream<String> listenToTextStream(String taskId) async* {
+    final client = http.Client();
+    final request = http.Request('GET', Uri.parse('${AppConfig.baseUrl}/text_stream/$taskId'));
+    
+    // Set standard SSE headers
+    request.headers['Accept'] = 'text/event-stream';
+    request.headers['Cache-Control'] = 'no-cache';
 
     try {
-      final client = http.Client();
-      final request = http.Request('GET', Uri.parse('${AppConfig.baseUrl}/stream/$taskId.mp3'));
       final response = await client.send(request);
-
-      if (response.statusCode != 200) return null;
-
-      String checkBuffer = '';
-      bool isError = false;
-
-      await for (final chunk in response.stream) {
-        if (isError) break;
-        final chunkStr = utf8.decode(chunk, allowMalformed: true);
-        checkBuffer += chunkStr;
-
-        if (checkBuffer.contains('"type":"stream_error"') || checkBuffer.contains('"stream_error"')) {
-          isError = true;
-          await sink.close();
-          if (await tempFile.exists()) await tempFile.delete();
-          return null;
-        }
-
-        if (checkBuffer.length > 100) checkBuffer = checkBuffer.substring(checkBuffer.length - 100);
-        sink.add(chunk);
+      if (response.statusCode != 200) {
+        throw Exception('Failed to connect to text stream: ${response.statusCode}');
       }
-      
-      await sink.close();
-      return isError ? null : tempFile.path;
-    } catch (e) {
-      await sink.close();
-      if (await tempFile.exists()) await tempFile.delete();
-      return null;
+
+      // Transform raw bytes to string lines
+      final lineStream = response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+
+      await for (final line in lineStream) {
+        if (line.startsWith('data: ')) {
+          final content = line.substring(6).trim();
+          
+          if (content == '[DONE]') {
+            break; // Stop the stream when server sends [DONE]
+          }
+
+          try {
+            final data = jsonDecode(content);
+            final token = data['token'] as String;
+            yield token; // Emit the token to the listener
+          } catch (e) {
+            // Ignore malformed JSON or empty heartbeats
+          }
+        }
+      }
+    } finally {
+      client.close(); // Ensure client is closed when stream ends
     }
   }
 }
@@ -115,11 +115,6 @@ class AudioService {
 
   Future<void> playStreamUrl(String url) async {
     await _player.play(UrlSource(url));
-  }
-
-  Future<void> cleanupLocalFile(String path) async {
-    final file = File(path);
-    if (await file.exists()) await file.delete();
   }
 
   void dispose() {

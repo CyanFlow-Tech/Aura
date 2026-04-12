@@ -67,9 +67,9 @@ class _AuraHomePageState extends State<AuraHomePage> {
                   _controller.displayText,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 24, 
-                    fontWeight: FontWeight.bold, 
-                    height: 1.5
+                    fontSize: 20, // Slightly smaller for long text
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
                   ),
                 ),
               ],
