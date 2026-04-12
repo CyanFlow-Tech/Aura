@@ -79,8 +79,8 @@ class AudioService {
     _player.setAudioContext(AudioContext(
       android: const AudioContextAndroid(
         audioFocus: AndroidAudioFocus.none,
-        contentType: AndroidContentType.speech,
-        usageType: AndroidUsageType.assistant,
+        contentType: AndroidContentType.music, 
+        usageType: AndroidUsageType.media,
       ),
       iOS: AudioContextIOS(
         category: AVAudioSessionCategory.playAndRecord,
@@ -111,6 +111,10 @@ class AudioService {
   Future<void> stopPlayer() async {
     await _player.stop();
     await _player.release();
+  }
+
+  Future<void> playStreamUrl(String url) async {
+    await _player.play(UrlSource(url));
   }
 
   Future<void> cleanupLocalFile(String path) async {

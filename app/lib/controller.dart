@@ -14,7 +14,6 @@ class AuraController extends ChangeNotifier {
   final KwsService _kwsService = KwsService();
   
   StreamSubscription<List<int>>? _micSubscription;
-  String? _currentPlayingFilePath;
 
   // state variables
   AppMode currentMode = AppMode.kws;
@@ -38,10 +37,7 @@ class AuraController extends ChangeNotifier {
   Future<void> _initSystem() async {
     // listen to the player completion event
     _audioService.onPlayerComplete.listen((_) {
-      if (_currentPlayingFilePath != null) {
-        _audioService.cleanupLocalFile(_currentPlayingFilePath!);
-      }
-      Future.delayed(const Duration(milliseconds: 500), _resetToKws);
+      Future.delayed(const Duration(milliseconds: 500), _hardResetToKws);
     });
 
     final status = await Permission.microphone.request();
@@ -106,40 +102,27 @@ class AuraController extends ChangeNotifier {
     if (currentMode != AppMode.recording) return;
     _updateState(AppMode.processing, '录音结束，正在发送给大脑...');
 
-    // 1. upload audio
     String? taskId = await _apiService.uploadAudio(_pcmBuffer);
     if (taskId == null) {
       _updateState(AppMode.kws, '大脑短路了：上传失败');
       _hardResetToKws();
       return;
     }
-
     _updateState(AppMode.processing, '正在思考中...');
     await _audioService.stopPlayer();
-
-    // 2. streaming download
-    _currentPlayingFilePath = await _apiService.downloadStreamAndSave(taskId);
-    
-    // 3. play audio
-    if (_currentPlayingFilePath != null) {
-      await _audioService.playLocalFile(_currentPlayingFilePath!);
-    } else {
-      _updateState(AppMode.kws, '后端生成失败或网络中断');
+    String streamUrl = '${AppConfig.baseUrl}/stream/$taskId.mp3';
+    try {
+      await _audioService.playStreamUrl(streamUrl);
+    } catch (e) {
+      _updateState(AppMode.kws, '流式连接失败');
       _hardResetToKws();
     }
-  }
-
-  void _resetToKws() {
-    if (_isDisposed) return;
-    _updateState(AppMode.kws, 'Aura 再次就绪\n请试着喊："小爱同学"');
-    _pcmBuffer.clear();
-    _kwsService.resetStream();
   }
 
   void _hardResetToKws() {
     Future.delayed(const Duration(seconds: 2), () {
       if (_isDisposed) return;
-      _updateState(AppMode.kws, 'Aura 再次就绪\n请试着喊："小爱同学"');
+      _updateState(AppMode.kws, 'Aura 就绪\n请试着喊："小爱同学"');
       _pcmBuffer.clear();
       _kwsService.hardResetStream();
     });
