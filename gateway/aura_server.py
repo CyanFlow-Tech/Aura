@@ -17,7 +17,8 @@ logger = Logger.build("AuraServer", "INFO")
 # inject_envs(dict([Envs.HF_ENDPOINT]))
 
 cache = LRUFileCache(cache_dir="./tmp_audio")
-tts_client = TTSClient.build("edge_tts")
+# tts_client = TTSClient.build("edge_tts")
+tts_client = TTSClient.build("cosyvoice")
 stt_client = STTClient.build("whisper")
 llm_client = LLMClient(
     api_url="http://192.168.1.172:11434/api/chat", 

@@ -63,7 +63,7 @@ class CosyVoiceClient(TTSClient):
         self, 
         host: Tuple[str, int] = ("localhost", 50000), 
         api: str = "/api/tts",
-        voice: str = "中文女_温柔",
+        voice: str = "中文女",
     ):
         self.host = host
         self.api = api
@@ -77,7 +77,8 @@ class CosyVoiceClient(TTSClient):
             "stream": True
         }
         audio_data = b""
-        async with httpx.AsyncClient() as client:
+        timeout = httpx.Timeout(20.0, connect=5.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream("POST", self.url, json=payload) as response:
                 async for chunk in response.aiter_bytes():
                     if chunk: audio_data += chunk

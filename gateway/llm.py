@@ -55,7 +55,7 @@ class AudioStreamLLM(LoggingMixin):
         self.llm_client = llm_client
         self.tts_client = tts_client
         self.fallback_audio = fallback_audio
-        self.min_sentence = 10
+        self.min_sentence = 20
         self.stop_flags = set("，。！？；,.!?;")
     
     @staticmethod
@@ -71,12 +71,12 @@ class AudioStreamLLM(LoggingMixin):
             async for char in self.llm_client.parse_response(response):
                 sentence += char
                 if char in self.stop_flags and len(sentence) >= self.min_sentence:
-                    self.logger.info(f"Generating audio for sentence: {sentence}")
                     if audio_bytes := await self.tts_client.text_to_speech(sentence):
+                        self.logger.info(f"Generating audio for sentence: {sentence}")
                         has_generated_audio = True
                         yield audio_bytes
                     sentence = ""
-        if audio_bytes := await self.tts_client.text_to_speech(sentence):
+        if sentence and (audio_bytes := await self.tts_client.text_to_speech(sentence)):
             has_generated_audio = True
             yield audio_bytes
 

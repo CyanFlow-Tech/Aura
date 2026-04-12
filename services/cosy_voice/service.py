@@ -10,17 +10,16 @@ import uvicorn
 import os, sys
 sys.path.insert(0, os.path.abspath('CosyVoice'))
 sys.path.insert(0, os.path.abspath('CosyVoice/third_party/Matcha-TTS'))
-from cosyvoice.cli.cosyvoice import CosyVoice
+from cosyvoice.cli.cosyvoice import AutoModel  # type: ignore
 
 app = FastAPI(title="CosyVoice Streaming API")
 
-print("Loading CosyVoice model to 3090 GPU...")
-cosyvoice = CosyVoice('pretrained_models/CosyVoice-300M-SFT')
-print("Model loaded successfully, waiting for Aura call!")
+# cosyvoice = AutoModel('pretrained_models/CosyVoice-300M-SFT')
+cosyvoice = AutoModel(model_dir='pretrained_models/Fun-CosyVoice3-0.5B')
 
 class TTSRequest(BaseModel):
     text: str
-    speaker: Literal["中文女", "中文男", "中文女_温柔", "中文女_情感"] = "中文女"
+    speaker: str = "中文女"
     stream: bool = True
 
 @app.post("/api/tts")
@@ -28,8 +27,13 @@ async def generate_voice(req: TTSRequest):
     
     def audio_stream_generator():
         print(f"\nStarting streaming synthesis -> {req.text}")
+        tts_generator = cosyvoice.inference_cross_lingual(
+            f'You are a helpful assistant.<|endofprompt|>{req.text}', 
+            './assets/girl.wav', stream=True, speed=1.5
+        )
+        # tts_generator = cosyvoice.inference_sft(req.text, req.speaker, stream=True)
         
-        for i, chunk_dict in enumerate(cosyvoice.inference_sft(req.text, req.speaker, stream=True)):
+        for i, chunk_dict in enumerate(tts_generator):
             tts_tensor = chunk_dict['tts_speech']
             
             audio_numpy = (tts_tensor.squeeze().numpy() * 32768).astype(np.int16)
