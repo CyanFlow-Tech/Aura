@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
@@ -15,6 +16,8 @@ class ApiService {
   Future<String?> uploadAudio(List<int> pcmBuffer) async {
     try {
       var request = http.MultipartRequest('POST', Uri.parse('${AppConfig.baseUrl}/upload'));
+      request.headers['X-Aura-Token'] = AppConfig.apiKey;
+
       request.files.add(http.MultipartFile.fromBytes('audio_file', pcmBuffer, filename: 'command.pcm'));
 
       var response = await request.send();
@@ -22,9 +25,13 @@ class ApiService {
         var responseBody = await response.stream.bytesToString();
         var data = jsonDecode(responseBody);
         return data['task_id'];
+      } else {
+        debugPrint('Failed to upload audio: ${response.statusCode}');
+        debugPrint('Response body: ${await response.stream.bytesToString()}');
       }
       return null;
     } catch (e) {
+      debugPrint('Error uploading audio: ${e.toString()}');
       return null;
     }
   }
@@ -36,6 +43,7 @@ class ApiService {
     // Set standard SSE headers
     request.headers['Accept'] = 'text/event-stream';
     request.headers['Cache-Control'] = 'no-cache';
+    request.headers['X-Aura-Token'] = AppConfig.apiKey;
 
     try {
       final response = await client.send(request);

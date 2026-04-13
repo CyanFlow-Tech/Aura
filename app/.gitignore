@@ -45,3 +45,6 @@ app.*.map.json
 /android/app/release
 
 /assets/kws_model/
+.env
+
+/android/app/src/main/res/raw/
