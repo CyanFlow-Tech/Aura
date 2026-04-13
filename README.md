@@ -1,4 +1,4 @@
-# Aura: A Non-contact Reading Assistant for Immersive Focus
+# Aura: A Non-contact Reading Assistant
 
 <div align="left">
 <img src="https://img.shields.io/badge/Flutter-black?logo=flutter" alt="Flutter">
@@ -6,6 +6,8 @@
 <img src="https://img.shields.io/badge/Nginx-black?logo=nginx" alt="Nginx">
 <img src="https://img.shields.io/github/license/CyanFlow-Tech/Aura" alt="License">
 </div>
+
+<img src="/docs/banner.gif" width="100%">
 
 ## 🌌 No Contact, No Distraction！
 
@@ -25,7 +27,7 @@ The Roadmap: In later stages, Aura will transition from a desk-bound assistant t
 
 ## 🏗️ Architecture: Device-Edge-Cloud Collaboration
 
-![](docs/architecture.png)
+<img src="/docs/architecture.png" width="50%">
 
 Aura operates on a tri-layer synergy to provide high-performance, intelligent assistance:
 
