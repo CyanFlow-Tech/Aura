@@ -4,6 +4,8 @@ import wave
 import os
 import json
 from fastapi import FastAPI, Response, UploadFile, File
+from fastapi import Security, HTTPException, status, Query
+from fastapi.security.api_key import APIKeyHeader
 from fastapi.responses import StreamingResponse
 from speech_to_text import STTClient
 from text_to_speech import TTSClient
@@ -11,11 +13,14 @@ from llm import AudioStreamLLM, LLMClient
 import asyncio
 from utils.cache import LRUFileCache
 from utils.mlogging import Logger
+from dotenv import load_dotenv
+
 
 logger = Logger.build("AuraServer", "INFO")
 
-# from utils.runtime_tool import inject_envs, Envs
-# inject_envs(dict([Envs.HF_ENDPOINT]))
+load_dotenv()
+API_KEY = os.getenv('AURA_API_KEY')
+api_key_header = APIKeyHeader(name="X-Aura-Token", auto_error=False)
 
 cache = LRUFileCache(cache_dir="./tmp_audio")
 # tts_client = TTSClient.build("edge_tts")
@@ -34,7 +39,21 @@ task_queues: dict[str, asyncio.Queue] = {}
 
 app = FastAPI(title="Aura Server")
 
-@app.post("/api/aura/upload")
+async def get_api_key(
+    api_key_header: str = Security(api_key_header),
+    token: str = Query(None)
+):
+    if api_key_header == API_KEY:
+        return api_key_header
+    if token == API_KEY:
+        return token
+        
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="无权访问"
+    )
+
+
+@app.post("/api/aura/upload", dependencies=[Security(get_api_key)])
 async def request(audio_file: UploadFile = File(...)):
     task_id = uuid.uuid4().hex
     save_path = cache.path(f"command_{task_id}.wav")
@@ -47,7 +66,7 @@ async def request(audio_file: UploadFile = File(...)):
     cache.evict(save_path)
     return {"status": "success", "task_id": task_id}
 
-@app.get("/api/aura/text_stream/{task_id}")
+@app.get("/api/aura/text_stream/{task_id}", dependencies=[Security(get_api_key)])
 async def text_stream(task_id: str):
     """
     SSE endpoint to push LLM tokens to the Flutter app in real-time.
@@ -77,7 +96,7 @@ async def text_stream(task_id: str):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-@app.get("/api/aura/stream/{task_id}.mp3")
+@app.get("/api/aura/audio_stream/{task_id}.mp3", dependencies=[Security(get_api_key)])
 async def get_response(task_id: str):
     save_path = cache.path(f"command_{task_id}.wav")
     
