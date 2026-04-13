@@ -119,7 +119,8 @@ class AuraController extends ChangeNotifier {
     _startSseTextStream(taskId);
 
     // 4. Start Audio Stream
-    String streamUrl = '${AppConfig.baseUrl}/stream/$taskId.mp3';
+    String encodedToken = Uri.encodeComponent(AppConfig.apiKey);
+    String streamUrl = '${AppConfig.baseUrl}/audio_stream/$taskId.mp3?token=$encodedToken';
     try {
       await _audioService.playStreamUrl(streamUrl);
     } catch (e) {

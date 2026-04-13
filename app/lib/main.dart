@@ -1,9 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'controller.dart';
+import 'dart:io';
+import 'config.dart';
 
-void main() {
+class LabHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        return host == AppConfig.serverIp;
+      };
+  }
+}
+
+Future<void> main() async {
+  await dotenv.load(fileName: ".env");
+  HttpOverrides.global = LabHttpOverrides(); 
   runApp(const AuraApp());
 }
+
 
 class AuraApp extends StatelessWidget {
   const AuraApp({super.key});
@@ -65,7 +81,7 @@ class _AuraHomePageState extends State<AuraHomePage> {
                 const SizedBox(height: 30),
                 Text(
                   _controller.displayText,
-                  textAlign: TextAlign.center,
+                  textAlign: TextAlign.justify,
                   style: const TextStyle(
                     fontSize: 20, // Slightly smaller for long text
                     fontWeight: FontWeight.w500,
