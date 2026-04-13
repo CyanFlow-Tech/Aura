@@ -9,7 +9,7 @@
 
 <img src="/docs/banner.gif" width="100%">
 
-## 🌌 No Contact, No Distraction！
+## 🌌 Never Contact, Never Distract. Just Interact!
 
 Aura is designed as a non-contact reading assistant to preserve the flow of deep, immersive reading.
 
