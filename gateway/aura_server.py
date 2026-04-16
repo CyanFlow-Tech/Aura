@@ -1,3 +1,4 @@
+import contextlib
 import uuid
 import uvicorn
 import wave
@@ -65,6 +66,41 @@ async def request(audio_file: UploadFile = File(...)):
         wav_file.writeframes(pcm_data)
     cache.evict(save_path)
     return {"status": "success", "task_id": task_id}
+
+@app.get("/api/aura/test", dependencies=[Security(get_api_key)])
+async def test(text: str):
+    text_queue = asyncio.Queue()
+    punctuations = set("，。！？；,.!?;")
+    async def produce_text():
+        sentence = ""
+        try:
+            async with llm_client.chat(text, think=False) as response:
+                async for char in llm_client.parse_response(response):
+                    sentence += char
+                    if char in punctuations and len(sentence) >= 10:
+                        await text_queue.put(sentence)
+                        sentence = ""
+            if sentence:
+                await text_queue.put(sentence)
+        finally:
+            await text_queue.put(None)
+
+    producer_task = asyncio.create_task(produce_text())
+
+    async def event_generator():
+        try:
+            while True:
+                token = await text_queue.get()
+                if token is None:
+                    break
+                yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+        finally:
+            if not producer_task.done():
+                producer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
+        
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/api/aura/text_stream/{task_id}", dependencies=[Security(get_api_key)])
 async def text_stream(task_id: str):

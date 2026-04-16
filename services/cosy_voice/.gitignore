@@ -1,3 +1,4 @@
 pretrained_models/*
+*.log
 *.wav
 __pycache__/
