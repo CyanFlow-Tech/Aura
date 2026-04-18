@@ -1,5 +1,6 @@
-from .text_to_speech import TextToSpeech
+from .searching import Searching
 from .speech_to_text import SpeechToText
+from .text_to_speech import TextToSpeech
 
 
-tools = [TextToSpeech, SpeechToText]
+tools = [TextToSpeech, SpeechToText, Searching]
