@@ -1,65 +1,77 @@
-import asyncio
+"""
+API layer: HTTP / SSE / audio encoding plus Pipeline dispatch.
+"""
+
+from __future__ import annotations
+
 import io
+import json
 import wave
 
+import uvicorn
 from fastapi import FastAPI, File, Security, UploadFile
 from fastapi.responses import StreamingResponse
-import uvicorn
 
-from session import SessionManager
-from utils.mlogging import Logger
 from auth import get_api_key
 from config import config
 from core import Aura
+from pipeline import CHANNEL_TTS_OUT, build_voice_chat_pipeline
+from session import SessionManager
+from utils.mlogging import Logger
 
 logger = Logger.build("AuraServer", config.app.logging_level)
-
 
 aura = Aura(config)
 session_manager = SessionManager()
 app = FastAPI(title=config.app.title)
 
 
-@app.post(config.api.upload, dependencies=[Security(get_api_key)])
-async def request(audio_file: UploadFile = File(...)):
+def _pcm_to_wav(pcm_data: bytes) -> io.BytesIO:
     wav_buffer = io.BytesIO()
-    pcm_data = await audio_file.read()
-    audio_config = config.audio
+    audio_cfg = config.audio
     with wave.open(wav_buffer, "wb") as wav_file:
-        wav_file.setnchannels(audio_config.channels)
-        wav_file.setsampwidth(audio_config.sample_width)
-        wav_file.setframerate(audio_config.frame_rate)
+        wav_file.setnchannels(audio_cfg.channels)
+        wav_file.setsampwidth(audio_cfg.sample_width)
+        wav_file.setframerate(audio_cfg.frame_rate)
         wav_file.writeframes(pcm_data)
     wav_buffer.seek(0)
-    
-    session = session_manager.new_session()
-    stt_task = asyncio.create_task(
-        aura.speech_to_text(wav_buffer, session.q_llm_input))
-    conv_task = asyncio.create_task(
-        aura.conversation(session.q_llm_input, session.q_tts_input))
-    session_manager.add_session_tasks(session.session_id, {stt_task, conv_task})
+    return wav_buffer
 
+
+@app.post(config.api.upload, dependencies=[Security(get_api_key)])
+async def upload(audio_file: UploadFile = File(...)):
+    pcm_data = await audio_file.read()
+    wav_buffer = _pcm_to_wav(pcm_data)
+
+    bundle = build_voice_chat_pipeline(aura, wav_buffer)
+    session = session_manager.new_session(bundle)
     return {"status": "success", "task_id": session.session_id}
+
 
 @app.get(config.api.text_stream, dependencies=[Security(get_api_key)])
 async def text_stream(task_id: str):
     session = session_manager.get_session(task_id)
-    stream = aura.get_text_stream(session.q_sse_input)
-    return StreamingResponse(
-        session_manager.stream_session(stream, session), 
-        media_type="text/event-stream"
-    )
+
+    async def gen():
+        async for sentence, _audio in session_manager.stream(session, CHANNEL_TTS_OUT):
+            payload = json.dumps({"token": sentence}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
 
 @app.get(config.api.audio_stream, dependencies=[Security(get_api_key)])
 async def audio_stream(task_id: str):
     session = session_manager.get_session(task_id)
-    stream = aura.get_audio_stream(session.q_tts_input, session.q_sse_input)
 
-    return StreamingResponse(
-        session_manager.stream_session(stream, session), 
-        media_type="audio/mpeg"
-    )
-    
+    async def gen():
+        async for _sentence, audio in session_manager.stream(session, CHANNEL_TTS_OUT):
+            yield audio
+
+    return StreamingResponse(gen(), media_type="audio/mpeg")
+
+
 if __name__ == "__main__":
     uvicorn.run(
         app,
