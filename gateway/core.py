@@ -40,7 +40,10 @@ class Aura(LoggingMixin):
     async def get_text_stream(self, text_queue: asyncio.Queue):
         while True:
             token = await text_queue.get()
-            data = json.dumps({'token': token}, ensure_ascii=False) if token != "[DONE]" else "[DONE]"
+            if token == "[DONE]":
+                yield "data: [DONE]\n\n"
+                break
+            data = json.dumps({'token': token}, ensure_ascii=False)
             yield f"data: {data}\n\n"
 
     async def get_audio_stream(self, tts_input_queue: asyncio.Queue, sse_input_queue: asyncio.Queue):
