@@ -66,17 +66,14 @@ class _AuraHomePageState extends State<AuraHomePage> {
         child: ListenableBuilder(
           listenable: _controller,
           builder: (context, child) {
+            final mode = _controller.currentMode;
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  _controller.currentMode == AppMode.recording ? Icons.mic 
-                    : _controller.currentMode == AppMode.kws ? Icons.hearing 
-                    : Icons.api,
+                  _iconForMode(mode),
                   size: 80,
-                  color: _controller.currentMode == AppMode.recording ? Colors.redAccent 
-                    : _controller.currentMode == AppMode.kws ? Colors.cyanAccent 
-                    : Colors.grey,
+                  color: _colorForMode(mode),
                 ),
                 const SizedBox(height: 30),
                 Text(
@@ -94,5 +91,43 @@ class _AuraHomePageState extends State<AuraHomePage> {
         ),
       ),
     );
+  }
+
+  IconData _iconForMode(AppMode mode) {
+    switch (mode) {
+      case AppMode.state0Kws:
+        return Icons.hearing;
+      case AppMode.state1Listening:
+        return Icons.mic;
+      case AppMode.state2Uploading:
+        return Icons.cloud_upload;
+      case AppMode.state3Responding:
+        return Icons.record_voice_over;
+      case AppMode.state4Interrupting:
+        return Icons.pan_tool;
+      case AppMode.state5Followup:
+        return Icons.help_outline;
+      case AppMode.state6SessionEnd:
+        return Icons.check_circle_outline;
+    }
+  }
+
+  Color _colorForMode(AppMode mode) {
+    switch (mode) {
+      case AppMode.state0Kws:
+        return Colors.cyanAccent;
+      case AppMode.state1Listening:
+        return Colors.redAccent;
+      case AppMode.state2Uploading:
+        return Colors.amberAccent;
+      case AppMode.state3Responding:
+        return Colors.greenAccent;
+      case AppMode.state4Interrupting:
+        return Colors.orangeAccent;
+      case AppMode.state5Followup:
+        return Colors.lightBlueAccent;
+      case AppMode.state6SessionEnd:
+        return Colors.grey;
+    }
   }
 }

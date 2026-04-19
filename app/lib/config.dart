@@ -14,4 +14,12 @@ class AppConfig {
   static const double volumeThreshold = 0.02; // trigger volume threshold
   static const int quietDurationMs = 3000;    // quiet duration threshold (milliseconds)
   static const double maxRecordSeconds = 20.0;// maximum recording duration (seconds)
+
+  // multi-turn keywords (must also exist in assets/kws_model/keywords.txt)
+  static const String wakeKeyword = '小爱同学';
+  static const String interruptKeyword = '请等一下';
+  static const String acknowledgeKeyword = '我明白了';
+
+  // followup (state 5) timing
+  static const int followupNoReplyMs = 4000;  // no-reply timeout after am_i_clear.wav
 }
