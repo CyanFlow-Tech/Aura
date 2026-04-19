@@ -6,6 +6,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydub import AudioSegment
 import uvicorn
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
 
 import os, sys
 sys.path.insert(0, os.path.abspath('CosyVoice'))
@@ -21,17 +25,26 @@ class TTSRequest(BaseModel):
     text: str
     speaker: str = "中文女"
     stream: bool = True
+    prompt: str = "Speak in a fast but clear manner."
+    speed: float = 2.0
 
 @app.post("/api/tts")
 async def generate_voice(req: TTSRequest):
     
     def audio_stream_generator():
         print(f"\nStarting streaming synthesis -> {req.text}")
-        tts_generator = cosyvoice.inference_cross_lingual(
-            f'You are a helpful assistant.<|endofprompt|>{req.text}', 
-            './assets/girl.wav', stream=True, speed=2.0
+        # tts_generator = cosyvoice.inference_cross_lingual(
+        #     f'You are a helpful assistant.<|endofprompt|>{req.text}', 
+        #     './assets/girl.wav', stream=True, speed=2.0
+        # )
+        
+        tts_generator = cosyvoice.inference_instruct2(
+            req.text, 
+            f'You are a helpful assistant. {req.prompt}<|endofprompt|>', 
+            './assets/girl.wav', 
+            stream=True,
+            speed=req.speed
         )
-        # tts_generator = cosyvoice.inference_sft(req.text, req.speaker, stream=True)
         
         for i, chunk_dict in enumerate(tts_generator):
             tts_tensor = chunk_dict['tts_speech']

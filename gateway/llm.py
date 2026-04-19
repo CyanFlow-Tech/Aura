@@ -28,13 +28,18 @@ class LLM(LoggingMixin):
         self.logger.info(f"LLM initialized: {self.model_name}")
 
     @asynccontextmanager
-    async def generate(self, user_text: str, think: bool = False) -> AsyncGenerator[httpx.Response, None]:
+    async def generate(
+        self,
+        messages: list[dict[str, str]],
+        think: bool = False,
+    ) -> AsyncGenerator[httpx.Response, None]:
+        """Stream a chat completion. `messages` must include the system
+        prompt and the full prior conversation; the caller (typically
+        `ConversationStage`) builds it from a `Conversation`.
+        """
         payload = {
             "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_text}
-            ],
+            "messages": messages,
             "stream": True,
             "think": think,
             "options": {"temperature": self.temperature}

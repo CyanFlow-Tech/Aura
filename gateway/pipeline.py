@@ -13,6 +13,7 @@ import io
 from typing import Any, NamedTuple
 
 from channels import BroadcastChannel, QueueChannel
+from conversation import Conversation
 from core import Aura
 from stages import ConversationStage, Stage, STTStage, TTSStage
 
@@ -31,7 +32,11 @@ class PipelineBundle(NamedTuple):
 CHANNEL_TTS_OUT = "tts_out"
 
 
-def build_voice_chat_pipeline(aura: Aura, audio_buffer: io.BytesIO) -> PipelineBundle:
+def build_voice_chat_pipeline(
+    aura: Aura,
+    audio_buffer: io.BytesIO,
+    conversation: Conversation,
+) -> PipelineBundle:
     """
     wav_buffer --> STT --> [user_text] --> Conversation --> [sentences]
                                                               |
@@ -42,6 +47,11 @@ def build_voice_chat_pipeline(aura: Aura, audio_buffer: io.BytesIO) -> PipelineB
                             audio_stream endpoint <-- subscribe --------'
 
     (*) broadcast channel, payload is (sentence, audio_bytes)
+
+    `conversation` is the per-session multi-turn memory; ConversationStage
+    appends this turn's user/assistant messages to it so the next turn (a
+    new pipeline built against the SAME `conversation` object) automatically
+    sees the prior context.
     """
     user_text: QueueChannel[str] = QueueChannel()
     sentences: QueueChannel[str] = QueueChannel()
@@ -49,7 +59,7 @@ def build_voice_chat_pipeline(aura: Aura, audio_buffer: io.BytesIO) -> PipelineB
 
     stages: list[Stage] = [
         STTStage(aura.stt, audio_buffer, user_text),
-        ConversationStage(aura.llm, user_text, sentences),
+        ConversationStage(aura.llm, conversation, user_text, sentences),
         TTSStage(aura.tts, sentences, tts_out),
     ]
     return PipelineBundle(

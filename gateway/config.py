@@ -20,9 +20,11 @@ class AppSettings:
 @dataclass
 class APISettings:
     test: str = "/api/aura/test"
-    text_stream: str = "/api/aura/text_stream/{task_id}"
-    audio_stream: str = "/api/aura/audio_stream/{task_id}.mp3"
+    text_stream: str = "/api/aura/text_stream/{session_id}"
+    audio_stream: str = "/api/aura/audio_stream/{session_id}.mp3"
     upload: str = "/api/aura/upload"
+    interrupt: str = "/api/aura/interrupt/{session_id}"
+    session_complete: str = "/api/aura/session_complete"
     auth_header: str = "X-Aura-Token"
     auth_token: str = os.getenv("AURA_API_KEY", "")
 
@@ -53,6 +55,24 @@ class StreamingSettings:
     test_min_sentence: int = 10
     audio_min_sentence: int = 20
     fallback_text: str = "模型未响应，请检查服务是否正常。"
+    # /audio_stream keepalive while waiting for the first real TTS chunk.
+    # Sent every `heartbeat_interval_s` seconds; stops automatically once
+    # any real audio arrives. Must stay well below the device-side player
+    # timeout (currently 30s). Set to 0 to disable.
+    heartbeat_interval_s: float = 10.0
+    # Path (relative to gateway/) of a pre-encoded MP3 file used as the
+    # heartbeat frame. Drop in any short MP3 clip (silence, soft "嗯",
+    # room tone, …) and restart to swap.
+    heartbeat_path: str = "assets/heartbeat.mp3"
+    # The heartbeat is re-encoded once at startup to match the live TTS
+    # output's frame format exactly. The Android `MediaPlayer` locks onto
+    # the format parameters of the very first MP3 header it parses; any
+    # later frames whose params disagree are dropped silently. Defaults
+    # below match the current CosyVoice output (22050 Hz / mono / 128k
+    # CBR). If you swap TTS engines, run `ffprobe` on a sample and update.
+    heartbeat_target_sample_rate: int = 22050
+    heartbeat_target_channels: int = 1
+    heartbeat_target_bitrate: str = "128k"
 
 
 @dataclass

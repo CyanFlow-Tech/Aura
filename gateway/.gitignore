@@ -3,4 +3,5 @@
 *.pcm
 *.log
 .env
+tmp/
 __pycache__/
