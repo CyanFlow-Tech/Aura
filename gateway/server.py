@@ -1,11 +1,5 @@
 """
 API layer: HTTP / SSE / audio encoding plus Pipeline dispatch.
-
-The cloud and the device speak in terms of `session_id` only — there is no
-separate "task id". One `session_id` covers the entire device-side dialog
-(state0→state6); each `/upload` runs a fresh Turn against the same Session
-so the LLM sees the full prior context. See `session.py` for the lifecycle
-contract.
 """
 
 from __future__ import annotations

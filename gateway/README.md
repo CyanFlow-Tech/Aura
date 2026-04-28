@@ -251,7 +251,7 @@ verification).
 
 ```bash
 uv sync
-uv run python server.py
+uv run server.py
 ```
 
 Config is assembled from dataclass defaults in `config.py` and optionally

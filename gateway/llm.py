@@ -1,9 +1,40 @@
 import json
+import os
 from typing import AsyncGenerator
 from utils.mlogging import LoggingMixin
 from contextlib import asynccontextmanager
 import httpx
 
+
+def parse_nnecloud(chunk: bytes):
+    data = json.loads(chunk)
+    return data.get("message", {}).get("content", "")
+
+def parse_hunyuan(chunk: bytes):
+    if not chunk: return None
+    try:
+        data = json.loads(chunk[len('data: '):])
+    except json.JSONDecodeError:
+        return None
+    if delta := data.get("choices", [{}])[0].get("delta", {}):
+        return delta.get("content", delta.get("reasoning_content", ""))
+    return None
+
+def parse_zhiyuan(chunk: bytes):
+    if not chunk: return None
+    try:
+        data = json.loads(chunk[len('data: '):])
+    except json.JSONDecodeError:
+        return None
+    if delta := data.get("choices", [{}])[0].get("delta", {}):
+        return delta.get("content", delta.get("reasoning_content", ""))
+    return None
+
+parser_map = {
+    "NNECLOUD": parse_nnecloud,
+    "HUNYUAN": parse_hunyuan,
+    "ZHIYUAN": parse_zhiyuan,
+}
 
 class LLM(LoggingMixin):
 
@@ -25,7 +56,17 @@ class LLM(LoggingMixin):
         self.timeout = timeout
         self.char_separators = set(char_separators)
         self.char_batch_size = char_batch_size
-        self.logger.info(f"LLM initialized: {self.model_name}")
+
+        if not self.api_url.startswith('http'):
+            self._parse_response = parser_map[self.api_url.upper()]
+            API_URL = self.api_url.upper() + "_API_URL"
+            API_KEY = self.api_url.upper() + "_API_KEY"
+            self.api_url = os.environ[API_URL]
+            self.api_key = os.environ[API_KEY]
+        else:
+            self._parse_response = parser_map["NNECLOUD"]
+
+        self.logger.info(f"LLM initialized: {self.model_name} at {self.api_url}")
 
     @asynccontextmanager
     async def generate(
@@ -44,8 +85,11 @@ class LLM(LoggingMixin):
             "think": think,
             "options": {"temperature": self.temperature}
         }
+        headers = {}
+        if hasattr(self, 'api_key'):
+            headers['Authorization'] = f'Bearer {self.api_key}'
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            async with client.stream("POST", self.api_url, json=payload) as response:  
+            async with client.stream("POST", self.api_url, json=payload, headers=headers) as response:  
                 if response.status_code != 200:
                     error_body = await response.aread()
                     self.logger.error(f"Chat failed ({response.status_code}): {error_body.decode('utf-8')}")
@@ -56,8 +100,7 @@ class LLM(LoggingMixin):
         async for chunk in response.aiter_lines():
             if not chunk: continue
             try:
-                data = json.loads(chunk)
-                token: str = data.get("message", {}).get("content", "")
+                token: str = self._parse_response(chunk)
                 if not token: continue
                 for char in token:
                     yield char
