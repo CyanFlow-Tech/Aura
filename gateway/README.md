@@ -65,7 +65,9 @@ flowchart TB
 - **Stage** (`stages.py`) — pure business coroutines. A Stage is any object
   with `async def run()`. Dependencies and channels are injected via its
   constructor. `ConversationStage` reads/writes the per-session
-  `Conversation` so multi-turn context survives across Turns.
+  `Conversation` so multi-turn context survives across Turns. Optional
+  retrieval stages can be inserted ahead of response generation without
+  touching Session / HTTP code.
 - **Pipeline** (`pipeline.py`) — a `build_*` factory that instantiates
   channels, instantiates stages with explicit wiring (including the
   injected `Conversation`), and returns a
@@ -246,6 +248,24 @@ The same Stage class can appear multiple times in one pipeline with
 different wiring, since each `XxxStage(...)` instantiation is independent
 (e.g. a `SearchStage` used both for pre-retrieval and post-hoc
 verification).
+
+### Optional retrieval pipeline
+
+The gateway also supports a retrieval-augmented variant of the voice-chat
+pipeline:
+
+`STT -> SearchIntentStage -> SearchStage -> SearchAugmentedConversationStage -> TTS`
+
+- `SearchIntentStage` first asks the LLM whether the current turn has a
+  live-search intent and, if so, emits a search-engine-friendly query.
+- `SearchStage` executes the query through the configured `Searching`
+  implementation (`SearXNG` by default).
+- `SearchAugmentedConversationStage` injects the retrieved snippets as
+  additional system context before generating the final answer.
+
+This variant is selected in `server.py` only when `config.retrieval.enabled`
+is true; otherwise the original `build_voice_chat_pipeline(...)` remains in
+use unchanged.
 
 ## Running
 

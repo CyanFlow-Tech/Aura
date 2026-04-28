@@ -4,3 +4,8 @@ llm:
   # model_name: "deepseek-chat"
   # api_url: "HUNYUAN"
   # model_name: "hunyuan-lite"
+
+retrieval:
+  enabled: true
+  max_results: 5
+  planner_history_messages: 6

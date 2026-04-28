@@ -26,9 +26,25 @@ class Conversation:
     def append_assistant(self, text: str) -> None:
         self.history.append({"role": "assistant", "content": text})
 
-    def messages(self, system_prompt: str) -> list[dict[str, str]]:
+    def messages(
+        self,
+        system_prompt: str,
+        extra_system_messages: list[str] | None = None,
+    ) -> list[dict[str, str]]:
         """Return the message list to feed into the LLM, with the
         system prompt prepended. Returns a fresh list so the caller is
         free to mutate it.
         """
-        return [{"role": "system", "content": system_prompt}, *self.history]
+        system_contents = [system_prompt]
+        if extra_system_messages:
+            system_contents.extend(content for content in extra_system_messages if content)
+        # Some providers (e.g. Hunyuan) require system role to appear only once
+        # and strictly at index 0.
+        messages = [{"role": "system", "content": "\n\n".join(system_contents)}]
+        messages.extend(self.history)
+        return messages
+
+    def recent_history(self, limit: int) -> list[dict[str, str]]:
+        if limit <= 0:
+            return []
+        return self.history[-limit:]

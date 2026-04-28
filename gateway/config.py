@@ -76,12 +76,20 @@ class StreamingSettings:
 
 
 @dataclass
+class RetrievalSettings:
+    enabled: bool = False
+    max_results: int = 5
+    planner_history_messages: int = 6
+
+
+@dataclass
 class AppConfig:
     app: AppSettings = field(default_factory=AppSettings)
     api: APISettings = field(default_factory=APISettings)
     audio: AudioSettings = field(default_factory=AudioSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     streaming: StreamingSettings = field(default_factory=StreamingSettings)
+    retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
 
 
 config = assemble_config(

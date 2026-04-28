@@ -19,7 +19,11 @@ from config import config
 from conversation import Conversation
 from core import Aura
 from heartbeat import load_heartbeat_assets, strip_id3v2
-from pipeline import CHANNEL_TTS_OUT, build_voice_chat_pipeline
+from pipeline import (
+    CHANNEL_TTS_OUT,
+    build_search_augmented_voice_chat_pipeline,
+    build_voice_chat_pipeline,
+)
 from session import SessionManager
 from utils.mlogging import Logger
 
@@ -71,6 +75,13 @@ async def upload(
     wav_buffer = _pcm_to_wav(pcm_data)
 
     def build(conversation: Conversation):
+        if config.retrieval.enabled:
+            return build_search_augmented_voice_chat_pipeline(
+                aura,
+                wav_buffer,
+                conversation,
+                config.retrieval,
+            )
         return build_voice_chat_pipeline(aura, wav_buffer, conversation)
 
     session = await session_manager.start_turn(session_id, build)

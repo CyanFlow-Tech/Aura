@@ -15,7 +15,16 @@ from typing import Any, NamedTuple
 from channels import BroadcastChannel, QueueChannel
 from conversation import Conversation
 from core import Aura
-from stages import ConversationStage, Stage, STTStage, TTSStage
+from stages import (
+    ConversationStage,
+    SearchAugmentedConversationStage,
+    SearchIntentStage,
+    SearchStage,
+    Stage,
+    STTStage,
+    TTSStage,
+    UserTurnContext,
+)
 
 
 class PipelineBundle(NamedTuple):
@@ -65,5 +74,59 @@ def build_voice_chat_pipeline(
     return PipelineBundle(
         stages=stages,
         channels=[user_text, sentences, tts_out],
+        endpoints={CHANNEL_TTS_OUT: tts_out},
+    )
+
+
+def build_search_augmented_voice_chat_pipeline(
+    aura: Aura,
+    audio_buffer: io.BytesIO,
+    conversation: Conversation,
+    retrieval_config: Any,
+) -> PipelineBundle:
+    """
+    wav_buffer --> STT --> [user_text] --> SearchIntent --> [turn_ctx]
+                                                  |
+                                                  v
+                                             SearchStage --> [turn_ctx]
+                                                  |
+                                                  v
+                                     SearchAugmentedConversation --> [sentences]
+                                                                      |
+                                                                      v
+                                                                    TTS --> [tts_out]*
+    """
+    user_text: QueueChannel[str] = QueueChannel()
+    planned_turn: QueueChannel[UserTurnContext] = QueueChannel()
+    retrieved_turn: QueueChannel[UserTurnContext] = QueueChannel()
+    sentences: QueueChannel[str] = QueueChannel()
+    tts_out: BroadcastChannel[tuple[str, bytes]] = BroadcastChannel()
+
+    stages: list[Stage] = [
+        STTStage(aura.stt, audio_buffer, user_text),
+        SearchIntentStage(
+            aura.llm,
+            conversation,
+            user_text,
+            planned_turn,
+            history_messages=retrieval_config.planner_history_messages,
+        ),
+        SearchStage(
+            aura.searching,
+            planned_turn,
+            retrieved_turn,
+            limit=retrieval_config.max_results,
+        ),
+        SearchAugmentedConversationStage(
+            aura.llm,
+            conversation,
+            retrieved_turn,
+            sentences,
+        ),
+        TTSStage(aura.tts, sentences, tts_out),
+    ]
+    return PipelineBundle(
+        stages=stages,
+        channels=[user_text, planned_turn, retrieved_turn, sentences, tts_out],
         endpoints={CHANNEL_TTS_OUT: tts_out},
     )

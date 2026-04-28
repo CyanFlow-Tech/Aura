@@ -92,9 +92,10 @@ class LLM(LoggingMixin):
             async with client.stream("POST", self.api_url, json=payload, headers=headers) as response:  
                 if response.status_code != 200:
                     error_body = await response.aread()
-                    self.logger.error(f"Chat failed ({response.status_code}): {error_body.decode('utf-8')}")
-                else:
-                    yield response
+                    error_text = error_body.decode("utf-8", errors="replace")
+                    self.logger.error(f"Chat failed ({response.status_code}): {error_text}")
+                    raise RuntimeError(f"LLM chat failed ({response.status_code}): {error_text}")
+                yield response
     
     async def parse_response(self, response: httpx.Response) -> AsyncGenerator[str, None]:
         async for chunk in response.aiter_lines():
@@ -107,3 +108,14 @@ class LLM(LoggingMixin):
             except Exception as e:
                 self.logger.error(f"JSON stream parsing exception: {e}")
                 self.logger.error(f"chunk content: {chunk}")
+
+    async def generate_text(
+        self,
+        messages: list[dict[str, str]],
+        think: bool = False,
+    ) -> str:
+        text = ""
+        async with self.generate(messages, think=think) as response:
+            async for chunk in self.parse_response(response):
+                text += chunk
+        return text
