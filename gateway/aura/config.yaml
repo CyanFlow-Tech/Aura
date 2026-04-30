@@ -1,0 +1,12 @@
+llm:
+  provider: "ZHIYUAN"
+  system_prompt: "你是阅读助手Aura，请简明扼要作答。输出结果使用普通文本，不要使用Markdown格式。用户的输入是语音转文字，可能有错别字，请注意纠正。"
+  # provider: "ZHIYUAN"
+  # model_name: "deepseek-chat"
+  # provider: "HUNYUAN"
+  # model_name: "hunyuan-lite"
+
+retrieval:
+  enabled: true
+  max_results: 5
+  planner_history_messages: 6

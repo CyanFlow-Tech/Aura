@@ -14,27 +14,27 @@ the layers below it.
 ```mermaid
 flowchart TB
     subgraph API["API layer"]
-        server["server.py<br/>HTTP endpoints, SSE framing"]
+        server["aura/server.py<br/>HTTP endpoints, SSE framing"]
     end
     subgraph Runtime["Session layer"]
-        session["session.py<br/>Session (multi-turn) + Turn (per-turn)<br/>SessionManager registry"]
+        session["aura/session.py<br/>Session (multi-turn) + Turn (per-turn)<br/>SessionManager registry"]
     end
     subgraph Memory["Conversation memory"]
-        conv["conversation.py<br/>per-session message history"]
+        conv["aura/conversation.py<br/>per-session message history"]
     end
     subgraph Wiring["Pipeline layer"]
-        pipeline["pipeline.py<br/>PipelineBundle + build_* factories"]
+        pipeline["aura/pipeline.py<br/>PipelineBundle + build_* factories"]
     end
     subgraph Logic["Stage layer"]
-        stages["stages.py<br/>Stage protocol + concrete stages"]
+        stages["aura/stages.py<br/>Stage protocol + concrete stages"]
     end
     subgraph Transport["Transport layer"]
-        channels["channels.py<br/>Send/ReceiveChannel protocols<br/>QueueChannel, BroadcastChannel"]
+        channels["aura/channels.py<br/>Send/ReceiveChannel protocols<br/>QueueChannel, BroadcastChannel"]
     end
     subgraph Deps["Domain deps"]
-        core["core.py (Aura container)"]
-        llm["llm.py"]
-        tools["tools/ (STT, TTS, ...)"]
+        core["aura/core.py (Aura container)"]
+        llm["aura/llm.py"]
+        tools["aura/tools/ (STT, TTS, ...)"]
     end
 
     server --> session
@@ -59,29 +59,29 @@ flowchart TB
 
 ### What each layer owns
 
-- **Transport** (`channels.py`) — `SendChannel` / `ReceiveChannel` protocols,
+- **Transport** (`aura/channels.py`) — `SendChannel` / `ReceiveChannel` protocols,
   plus `QueueChannel` (1→1 / N→1) and `BroadcastChannel` (1→N fan-out with
   late-subscriber replay). Business code never touches `asyncio.Queue`.
-- **Stage** (`stages.py`) — pure business coroutines. A Stage is any object
+- **Stage** (`aura/stages.py`) — pure business coroutines. A Stage is any object
   with `async def run()`. Dependencies and channels are injected via its
   constructor. `ConversationStage` reads/writes the per-session
   `Conversation` so multi-turn context survives across Turns. Optional
   retrieval stages can be inserted ahead of response generation without
   touching Session / HTTP code.
-- **Pipeline** (`pipeline.py`) — a `build_*` factory that instantiates
+- **Pipeline** (`aura/pipeline.py`) — a `build_*` factory that instantiates
   channels, instantiates stages with explicit wiring (including the
   injected `Conversation`), and returns a
   `PipelineBundle(stages, channels, endpoints)`.
-- **Conversation memory** (`conversation.py`) — a thin dataclass holding
+- **Conversation memory** (`aura/conversation.py`) — a thin dataclass holding
   the `(role, content)` history for one `session_id`. Lives on the
   `Session`; injected into `ConversationStage` at pipeline-build time.
-- **Session** (`session.py`) — `Session` is the multi-turn container
+- **Session** (`aura/session.py`) — `Session` is the multi-turn container
   identified by `session_id`; it owns the `Conversation` and exactly one
   in-flight `Turn`. `Turn` is what used to be the single-turn `Session`:
   it runs the pipeline inside `asyncio.TaskGroup` and closes all channels
   in `finally` so SSE / audio consumers iterating with `async for` always
   unwind cleanly.
-- **API** (`server.py`) — FastAPI endpoints. Handles SSE framing and
+- **API** (`aura/server.py`) — FastAPI endpoints. Handles SSE framing and
   audio response headers; does not know anything about Stage internals.
 
 ## Runtime data flow (voice-chat pipeline)
@@ -205,7 +205,7 @@ during that gap:
 stream while waiting for the first real chunk, made of two
 pre-encoded assets:
 
-- **`assets/heartbeat.mp3`** — the audible cue you want the user to
+- **`aura/assets/heartbeat.mp3`** — the audible cue you want the user to
   hear (silence, soft "嗯", breath, room tone, …). Re-encoded at
   startup via `ffmpeg` to match the live TTS frame format. Emitted
   every `config.streaming.heartbeat_interval_s` seconds (default 10).
@@ -240,9 +240,19 @@ Only two surfaces are meant to grow:
    Close its output channel(s) in `finally` so downstream terminates
    naturally (no `[DONE]` sentinels).
 2. **Add a Pipeline** — write a new `build_xxx(...)` factory in
-   `pipeline.py` that instantiates channels, instantiates stages, and
+   `aura/pipeline.py` that instantiates channels, instantiates stages, and
    returns a `PipelineBundle`. `Session` / `Turn` / `SessionManager` /
-   `channels.py` do not need to change.
+   `aura/channels.py` do not need to change.
+
+## Package layout
+
+All runtime code now lives under the `aura/` package. Preferred entrypoints:
+
+- Server: `python -m aura.server`
+- Client test: `python -m aura.aura_client_test --text '...'`
+
+Thin compatibility wrappers remain at the repository root (`server.py`,
+`aura_client_test.py`) so existing local commands do not break immediately.
 
 The same Stage class can appear multiple times in one pipeline with
 different wiring, since each `XxxStage(...)` instantiation is independent
